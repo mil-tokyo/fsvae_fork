@@ -80,6 +80,7 @@ def compute_autoencoder_frechet_distance(dataset_name, gen=None, fdir=None, num_
         dl = iter(dl)
         for idx in tqdm(range(num_iters)):
             img_batch = next(dl)
+            img_batch = img_batch.to(device)
             feat = feat_model.encode(img_batch)
             l_feats.append(feat.detach().cpu().numpy())
     np_feats = np.concatenate(l_feats)
