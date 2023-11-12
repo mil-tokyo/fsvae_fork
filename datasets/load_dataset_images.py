@@ -8,7 +8,7 @@ class ImageDataset(Dataset):
     def __init__(self, root, transform=None, grayscale=False):
         self.root = root
         self.transform = transform
-        self.paths = glob.glob(os.path.join(self.root, '*/*.png'))
+        self.paths = glob.glob(os.path.join(self.root, '**/*.png'), recursive=True)
         self.grayscale = grayscale
 
     def __getitem__(self, index):
