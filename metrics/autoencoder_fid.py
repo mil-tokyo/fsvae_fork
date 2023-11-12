@@ -10,7 +10,8 @@ from scipy import linalg
 
 from PIL import Image
 import ann_models.ann_ae as ann_ae
-from datasets import load_dataset_ann
+from datasets import load_dataset_ann, load_dataset_images
+
 
 
 def get_autoencoder_frechet_distance(model, dataset, device, num_gen=5000):
@@ -33,23 +34,27 @@ def get_autoencoder_frechet_distance_ann(model, dataset, device, num_gen=5000):
 
     return score
 
-def compute_autoencoder_frechet_distance(gen, dataset_name, num_gen=5000, batch_size=256, 
+def compute_autoencoder_frechet_distance(dataset_name, gen=None, fdir=None, num_gen=5000, batch_size=256,
                                         device=torch.device("cuda")):
-    if dataset_name.lower() == 'mnist':     
-        in_channels = 1 
+    if dataset_name.lower() == 'mnist':
+        in_channels = 1
         latent_dim=64
+        grayscale=True
         feat_model = ann_ae.AE(in_channels, latent_dim).to(device)
     elif dataset_name.lower() == 'fashion':
         in_channels = 1
         latent_dim=64
+        grayscale = True
         feat_model = ann_ae.AE(in_channels, latent_dim).to(device)
     elif dataset_name.lower() == 'celeba':
         in_channels = 3
         latent_dim = 128
+        grayscale = False
         feat_model = ann_ae.AELarge(in_channels, latent_dim).to(device)
     elif dataset_name.lower() == 'cifar10':
         in_channels = 3
         latent_dim = 128
+        grayscale = False
         feat_model = ann_ae.AE(in_channels, latent_dim).to(device)
     else:
         raise ValueError()
@@ -57,20 +62,28 @@ def compute_autoencoder_frechet_distance(gen, dataset_name, num_gen=5000, batch_
     stats = np.load(f'metrics/stats/{dataset_name.lower()}_test_{latent_dim}.npz')
     ref_mu, ref_sigma = stats["mu"], stats["sigma"]
 
-    feat_model.load_state_dict(torch.load(f'metrics/stat_checkpoints/{dataset_name.lower()}_{latent_dim}.pth'))
+    feat_model.load_state_dict(torch.load(f'metrics/stat_checkpoints/{dataset_name.lower()}_{latent_dim}.pth', map_location='cpu'))
 
     num_iters = int(np.ceil(num_gen / batch_size))
     l_feats = []
     print("compute Frechet Autoencoder Distance")
-    for idx in tqdm(range(num_iters)):
-        with torch.no_grad():
-            # genearted image is in range [-1,1]
-            # no need to resize
-            img_batch = gen(batch_size) 
+    if gen is not None:
+        for idx in tqdm(range(num_iters)):
+            with torch.no_grad():
+                # genearted image is in range [-1,1]
+                # no need to resize
+                img_batch = gen(batch_size)
+                feat = feat_model.encode(img_batch)
+            l_feats.append(feat.detach().cpu().numpy())
+    elif fdir is not None:
+        dl = load_dataset_images.load_images(fdir, batch_size, grayscale=grayscale)
+        dl = iter(dl)
+        for idx in tqdm(range(num_iters)):
+            img_batch = next(dl)
             feat = feat_model.encode(img_batch)
-        l_feats.append(feat.detach().cpu().numpy())
+            l_feats.append(feat.detach().cpu().numpy())
     np_feats = np.concatenate(l_feats)
-    
+
     mu = np.mean(np_feats, axis=0)
     sigma = np.cov(np_feats, rowvar=False)
     fid = frechet_distance(mu, sigma, ref_mu, ref_sigma)
@@ -85,11 +98,11 @@ def make_custom_stats(stat_name, dataset_name, checkpoint, latent_dim=64,
     if os.path.exists(outf):
         msg = f"The statistics file {stat_name} already exists. "
         raise Exception(msg)
-    
-    
-    if dataset_name == 'mnist':     
+
+
+    if dataset_name == 'mnist':
         _, test_loader = load_dataset_ann.load_mnist(batch_size)
-        in_channels = 1 
+        in_channels = 1
         feat_model = ann_ae.AE(in_channels, latent_dim).to(device)
     elif dataset_name == 'fashion':
         _, test_loader = load_dataset_ann.load_fashionmnist(batch_size)
@@ -107,7 +120,7 @@ def make_custom_stats(stat_name, dataset_name, checkpoint, latent_dim=64,
         raise ValueError()
 
     feat_model.load_state_dict(torch.load(checkpoint))
-    
+
     l_feats = []
     with torch.no_grad():
         for img, label in tqdm(test_loader):
